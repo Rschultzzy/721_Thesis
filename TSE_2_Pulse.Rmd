@@ -1,0 +1,254 @@
+---
+title: "TSE_2_Schultz"
+author: "Robert Schultz"
+date: "2/15/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(xml2)
+library(rvest)
+library(survey)
+library(magrittr)
+library(scales)
+library(ggpubr)
+library(dplyr)
+library(sjPlot)
+library(stargazer)
+```
+
+```{r cars}
+# Pull in Pulse ACS Data
+# Pull in ACS Weighting Data
+library(haven)
+pulse2022_puf_41 <- read_sas("~/Downloads/HPS_Week41_PUF_SAS/pulse2022_puf_41.sas7bdat", 
+    NULL)
+pulse2022_repwgt_puf_41 <- read_sas("Downloads/HPS_Week41_PUF_SAS/pulse2022_repwgt_puf_41.sas7bdat", 
+    NULL)
+
+```
+
+```{r}
+# Rename Data sets
+Pulse <- pulse2022_puf_41
+Weight <- pulse2022_repwgt_puf_41
+```
+
+```{r}
+# Create new data frame w/ selected variables
+# Pull age and weight variable
+Pulse2 <- data.frame(Pulse$EGENID_BIRTH, Pulse$GENID_DESCRIBE, Pulse$DOWN, Pulse$ANXIOUS, Pulse$RRACE, Pulse$SCRAM, Pulse$PWEIGHT, Pulse$TBIRTH_YEAR)
+colnames(Pulse2)
+```
+
+```{r}
+survey::svrepdesign(data = Weight,
+                    type = "ACS",
+                    repweights = "REPWTP[1-160]+",
+                    weights = "PWEIGHT",
+                    combined.weights = TRUE, 
+                    mse = TRUE)
+```
+
+```{r}
+# Create new variable for Age (2021 - Year Born)
+summary(Pulse2$Pulse.TBIRTH_YEAR)
+Age.Center <-mean(Pulse2$Pulse.TBIRTH_YEAR)
+Center.AGE <- (Pulse2$Pulse.TBIRTH_YEAR - Age.Center)
+Pulse2$Center.AGE <- (Pulse2$Pulse.TBIRTH_YEAR - Age.Center)
+hist(Pulse2$Center.AGE)
+```
+```{r}
+#Re-code -99 as Non Response (N/A's)
+Pulse2 <- Pulse2 %>% mutate(Pulse.GENID_DESCRIBE = replace(Pulse.GENID_DESCRIBE, Pulse.GENID_DESCRIBE == "-99", NA))
+Pulse2 <- Pulse2 %>% mutate(Pulse.DOWN = replace(Pulse.DOWN, Pulse.DOWN == "-99", NA))
+Pulse2 <- Pulse2 %>% mutate(Pulse.ANXIOUS = replace(Pulse.ANXIOUS, Pulse.ANXIOUS == "-99", NA))
+```
+
+```{r}
+# Remove all N/A's from data file
+na.omit(Pulse2)
+Pulse2 <- Pulse2[complete.cases(Pulse2), ]
+```
+
+```{r}
+names(Pulse2)[names(Pulse2) == "Pulse.EGENID_BIRTH"] <- "Gender_Birth"
+names(Pulse2)[names(Pulse2) == "Pulse.GENID_DESCRIBE"] <- "Gender_Identity"
+names(Pulse2)[names(Pulse2) == "Pulse.DOWN"] <- "Depression"
+names(Pulse2)[names(Pulse2) == "Pulse.ANXIOUS"] <- "Anxiety"
+names(Pulse2)[names(Pulse2) == "Pulse.RRACE"] <- "Race"
+names(Pulse2)[names(Pulse2) == "Center.AGE"] <- "Age"
+colnames(Pulse2)
+```
+
+```{r}
+Pulse2$Gender_Birth[Pulse2$Gender_Birth == "1"] <- "Male"
+Pulse2$Gender_Birth[Pulse2$Gender_Birth == "2"] <- "Female"
+
+Pulse2$Gender_Identity[Pulse2$Gender_Identity == "1"] <- "Male"
+Pulse2$Gender_Identity[Pulse2$Gender_Identity == "2"] <- "Female"
+Pulse2$Gender_Identity[Pulse2$Gender_Identity == "3"] <- "Transgender"
+Pulse2$Gender_Identity[Pulse2$Gender_Identity == "4"] <- "Other"
+
+Pulse2$Race[Pulse2$Race == "1"] <- "White"
+Pulse2$Race[Pulse2$Race == "2"] <- "African American"
+Pulse2$Race[Pulse2$Race == "3"] <- "Asian"
+Pulse2$Race[Pulse2$Race == "4"] <- "Other"
+```
+
+```{r}
+# Survey Design Weighting
+dclus1<-svydesign(id=~0, weights=~Pulse.PWEIGHT, data=Pulse2)
+
+svymean(~Gender_Birth, design=dclus1, na.rm=T)
+svymean(~Gender_Identity, design=dclus1, na.rm = T)
+svymean(~Depression, design=dclus1, na.rm=T)
+svymean(~Anxiety, design=dclus1, na.rm=T)
+svymean(~Age, design=dclus1, na.rm=T)
+svymean(~Race, design=dclus1, na.rm=T)
+```
+
+```{r}
+source("http://pcwww.liv.ac.uk/~william/R/crosstab.r")
+library(questionr)
+require(questionr)
+
+table1 <- prop.table(wtd.table(Pulse2$Gender_Birth, Pulse2$Gender_Identity, weights =Pulse2$Pulse.PWEIGHT), margin = 1 )
+table2 <-prop.table(wtd.table(Pulse2$Gender_Birth, Pulse2$Gender_Identity, weights =Pulse2$Pulse.PWEIGHT), margin = 2 )
+```
+
+```{r}
+print(table2)
+```
+```{r}
+table3 <- prop.table(wtd.table(Pulse2$Gender_Identity, Pulse2$Gender_Birth, weights =Pulse2$Pulse.PWEIGHT), margin = 1 )
+print(table3)
+```
+
+```{r}
+#RAO Scott Sig. Testing
+design2 <- design1 (weights=~PWEIGHT, nest=T, data=Pulse2)
+
+svychisq(~ASTHMA + SURVEY, design2, statistic="F", na.rm=T)
+svychisq(~DIABETES + SURVEY, design2, statistic="F", na.rm=T)
+svychisq(~HBP + SURVEY, design2, statistic="F", na.rm=T)
+svychisq(~CHOL + SURVEY, design2, statistic="F", na.rm=T)
+svychisq(~COPD + SURVEY, design2, statistic="F", na.rm=T)
+svychisq(~DEP + SURVEY, design2, statistic="F", na.rm=T)
+svychisq(~ANX + SURVEY, design2, statistic="F", na.rm=T)
+```
+
+```{r}
+barplot(table(Pulse2$Pulse.EGENID_BIRTH, Pulse2$Pulse.ANXIOUS), beside = T, 
+        cex.names = 0.7, legend.text = c("Male","Female"),
+        names.arg=c("Not at all","Several days", "More than half the days","Nearly Every Day"),
+        args.legend = list(x="topright", y=25, cex=0.8),
+         main="Anxiety Levels by Gender Assigned at Birth",
+        xlab="Frequency of anxiety over previous 2 weeks",
+        ylab="Count",
+        col = c("light blue", "blue"))
+```
+```{r}
+kruskal.test(Pulse.ANXIOUS~Pulse.EGENID_BIRTH,data = Pulse2)
+```
+```{r}
+barplot(table(Pulse2$Pulse.EGENID_BIRTH, Pulse2$Pulse.DOWN), beside = T, 
+        cex.names = 0.7, legend.text = c("Male","Female"),
+        names.arg=c("Not at all","Several days", "More than half the days","Nearly Every Day"),
+        args.legend = list(x="topright", y=25, cex=0.8),
+         main="Depression Levels by Gender Assigned at Birth",
+        xlab="Frequency of feeling depressed over previous 2 weeks",
+        ylab="Count",
+        col = c("light blue", "blue"))
+
+```
+
+```{r}
+kruskal.test(Anxiety~Gender_Identity,data = Pulse2)
+```
+
+```{r}
+Pulse2$Anxiety <- factor(Pulse2$Anxiety)
+Pulse2$Gender_Identity <- factor(Pulse2$Gender_Identity)
+Pulse2$Race <- factor(Pulse2$Race)
+
+Pulse2$Gender_Identity <- relevel(Pulse2$Gender_Identity, ref = "Male")
+                              
+dclus1<-svydesign(id=~0, weights=~Pulse.PWEIGHT, data=Pulse2)
+model3 <-svyolr(Anxiety ~ Gender_Identity + Age + Race, design=dclus1)
+summary(model3)
+```
+
+```{r}
+coef(model3)
+exp(coef(model3))
+exp(model3$zeta)
+```
+
+```{r}
+library(sjPlot)
+tab_model(model3,show.se = T, title = "Table 1")
+```
+
+```{r}
+
+}"Å
+|
+AQZ43WQclus1<-svydesign(id=~0, weights=~Pulse.PWEIGHT, data=Pulse2)
+model4 <-svyolr(Anxiety ~ Gender_Birth + Age + Race, design=dclus1)
+summary(model4)
+```
+
+```{r}
+# Pull out coefficients 
+coef(model4)
+exp(coef(model4))
+exp(model4$zeta)
+```
+
+```{r}
+library(sjPlot)
+tab_model(model4,show.se = T, title = "Table 2")
+```
+
+```{r}
+svy <- as_survey(data, weight = PERWT , repweights = matches(“REPWTP[0-9]+”), 
+      type = “JK1”, scale = 4/ 80 , rscales = rep(1, 80 ), mse = TRUE)
+
+svy <- svrepdesign(data = data, weight = ~ ASECWTH, repweights = “ REPWT[0-9]+”, 
+      type = “JK1”, scale = 4/160, rscales = rep(1, 160), mse = TRUE)
+```
+
+```{r}
+library(stargazer)
+set_theme(geom.label.color = "Blue", geom.label.size = 3)
+plot_grpfrq(Pulse2$Pulse.EGENID_BIRTH, Pulse2$Pulse.GENID_DESCRIBE, expand.grid = TRUE , title = "Gender at Birth by Gender Identity", axis.titles = "Gender at Birth",axis.labels = c("Male","Female"), legend.title = "Current Gender Identity", legend.labels = c("Male","Female","Transgender","None of the Above"))
+```
+```{r}
+library(stargazer)
+set_theme(geom.label.color = "blue", geom.label.size = 3)
+plot_frq(Pulse2$Pulse.EGENID_BIRTH, type = "bar", title = "Gender assiged at birth",axis.title = "Gender at Birth", axis.labels = c("Male", "Female"))  + set_theme(geom.label.color = "blue", geom.label.size = 3) 
+```
+
+```{r}
+library(ggplot2)
+plot_model(model3)
+plot_model(model4)
+```
+```{r}
+par(mfrow=c(2,1))
+plot_model(model3)
+plot_model(model4)
+
+```
+```{r}
+citation("sampling")
+citation("survey")
+citation("ggplot2")
+RStudio.Version()
+R.version
+```
+
+
+
